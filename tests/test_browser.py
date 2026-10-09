@@ -17,13 +17,13 @@ PAGE = """data:text/html,<html><body style='margin:0'>
 <script>document.addEventListener('dblclick',()=>document.title='dbl')</script></body></html>"""
 
 
-def test_browser_end_to_end():
+def test_browser_end_to_end(unavailable):
     async def main():
         b = BrowserBackend(url=PAGE, width=800, height=600, input_delay=0)
         try:
             await b.start()
         except Exception as e:  # 브라우저 바이너리가 없는 환경
-            pytest.skip(f"Chromium 을 띄울 수 없습니다: {e}")
+            unavailable(f"Chromium 을 띄울 수 없습니다: {e}")
         try:
             img = await b.capture()
             assert img.size == (800, 600)

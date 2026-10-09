@@ -30,7 +30,8 @@ def _add_client_args(p: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="vmonitor", description="앱/브라우저 화면을 모니터처럼 송출하고 AI·매크로가 조작하게 하는 게이트웨이")
+    ap = argparse.ArgumentParser(prog="vmonitor",
+                                 description="앱/브라우저 화면을 모니터처럼 송출하고 AI·매크로가 조작하게 하는 게이트웨이")
     ap.add_argument("--version", action="version", version=f"vmonitor {__version__}")
     ap.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -111,6 +112,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # Windows 에서 출력을 파일·파이프로 돌리면 cp949/cp1252 로 인코딩되어 일부 문자가 오류를 낼 수 있음 → 대체 문자로 출력
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
+        except Exception:
+            pass
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=getattr(logging, args.log_level), format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         stream=sys.stderr)

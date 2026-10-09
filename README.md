@@ -1,5 +1,7 @@
 # VMonitor — 가상 모니터 브릿지
 
+[![CI](https://github.com/cerbagge/antitunsite/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cerbagge/antitunsite/actions/workflows/ci.yml)
+
 > 특정 **앱 창이나 브라우저를 '모니터'처럼 송출**하고, 그 화면을 **다른 AI·매크로가 보고**
 > **실제 PC처럼 마우스·키보드 입력**을 보내 조작할 수 있게 해 주는 게이트웨이입니다.
 
@@ -223,11 +225,22 @@ vmonitor/
     x11.py            X11/Xvfb 캡처 + XTest 입력
     demo.py           내장 데모 화면
   web/viewer.html     웹 뷰어
-tests/                pytest (키·액션·서버·브라우저·X11·MCP·에이전트)
+tests/                pytest (키·액션·서버·브라우저·X11·Windows·MCP·에이전트)
+.github/workflows/    CI (린트·패키지, Linux, Windows)
 examples/             매크로·이미지 서치·영상 분석 예제
 ```
 
-테스트: `pip install -e ".[all,dev]" && pytest`
+테스트: `pip install -e ".[all,dev]" && pytest` (린트: `ruff check .`)
+
+CI(GitHub Actions)는 PR·`main` 푸시마다 실행됩니다.
+
+| 작업 | 내용 |
+|---|---|
+| 린트 · 패키지 | `ruff check`, wheel 빌드 후 설치해 웹 뷰어 포함 여부 확인 |
+| 테스트 (Linux, Python 3.10 / 3.13) | 전체 테스트 + Xvfb 가상 모니터 안 Chromium 앱 창 입력 + 브라우저 백엔드 |
+| 테스트 (Windows) | 전체 테스트 + **메모장을 실제로 띄워 캡처·입력(post / sendinput) 확인** |
+
+CI 에서는 `VMONITOR_STRICT_TESTS=1` 이 켜져 있어 통합 테스트가 환경 문제로 건너뛰어지면 실패로 처리됩니다.
 
 ## 7. 알려진 제한
 

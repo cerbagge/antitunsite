@@ -1,12 +1,17 @@
 """X11 백엔드 통합 테스트 (Linux + Xvfb + python-xlib 이 있을 때만)."""
 
 import asyncio
+import os
 import shutil
 import sys
 
 import pytest
 
-if sys.platform != "linux" or not shutil.which("Xvfb"):
+if sys.platform != "linux":
+    pytest.skip("Linux 전용", allow_module_level=True)
+if not shutil.which("Xvfb"):
+    if os.environ.get("VMONITOR_STRICT_TESTS") == "1":
+        raise RuntimeError("[VMONITOR_STRICT_TESTS] Xvfb 가 설치되어 있지 않습니다")
     pytest.skip("Xvfb 가 필요합니다", allow_module_level=True)
 pytest.importorskip("Xlib")
 
@@ -39,16 +44,15 @@ def test_virtual_monitor_capture_and_pointer():
     asyncio.run(main())
 
 
-def test_app_window_typing():
+def test_app_window_typing(unavailable):
     """Xvfb 안에 Chromium 앱 창을 띄워 창 영역만 송출하고, 클릭·한글 타이핑이 실제로 들어가는지 확인."""
     try:
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as pw:
             chrome = pw.chromium.executable_path
-    except Exception:
-        pytest.skip("Chromium 이 없습니다")
-    import os
+    except Exception as e:
+        unavailable(f"Chromium 이 없습니다: {e}")
     import tempfile
 
     tmp = tempfile.mkdtemp()
@@ -65,7 +69,7 @@ def test_app_window_typing():
         try:
             await b.start()
         except Exception as e:
-            pytest.skip(f"앱 창을 띄울 수 없습니다: {e}")
+            unavailable(f"앱 창을 띄울 수 없습니다: {e}")
         try:
             await asyncio.sleep(2)
             img = await b.capture()

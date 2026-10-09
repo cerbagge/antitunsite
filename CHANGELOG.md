@@ -2,6 +2,18 @@
 
 버전 규칙: `주.부.수` — 주(메인 기능 추가/수정/삭제), 부(중요 버그 수정·덜 중요한 기능 변경), 수(자잘한 버그 수정)
 
+## 1.0.1 — 2026-10-09
+
+### 추가
+- GitHub Actions CI (`.github/workflows/ci.yml`): 린트(ruff)·wheel 패키징 확인, Linux(Python 3.10·3.13) 전체 테스트,
+  Windows 전체 테스트 + 메모장 실제 캡처·입력(post/sendinput) 통합 테스트
+- 테스트 엄격 모드(`VMONITOR_STRICT_TESTS=1`): CI 에서 브라우저·가상 모니터·Windows 통합 테스트가 건너뛰어지면 실패 처리
+- ruff 설정을 `pyproject.toml` 로 통일
+
+### 수정
+- Python 3.10 에서 MCP `screenshot` 도구가 이미지 직렬화 오류로 실패하던 문제
+- Windows 에서 출력을 파일·파이프로 돌릴 때 한글 등 문자 인코딩 오류로 CLI 가 중단될 수 있던 문제
+
 ## 1.0.0 — 2026-10-09
 
 첫 공개 버전.

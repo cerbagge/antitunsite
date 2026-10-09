@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import socket
 import threading
 import time
@@ -46,3 +47,18 @@ def live_server():
     backend = DemoBackend(width=960, height=600, input_delay=0)
     with LiveServer(backend) as srv:
         yield srv
+
+
+STRICT = os.environ.get("VMONITOR_STRICT_TESTS") == "1"
+
+
+def require(reason: str) -> None:
+    """실행 환경이 없어 통합 테스트를 할 수 없을 때: 평소엔 건너뛰고, CI(엄격 모드)에선 실패시킵니다."""
+    if STRICT:
+        pytest.fail(f"[VMONITOR_STRICT_TESTS] {reason}")
+    pytest.skip(reason)
+
+
+@pytest.fixture
+def unavailable():
+    return require

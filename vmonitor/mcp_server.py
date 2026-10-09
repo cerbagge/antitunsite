@@ -24,15 +24,16 @@ INSTRUCTIONS = (
 )
 
 
-def _load_server_class() -> tuple[Any, Any]:
-    try:  # mcp 2.x
-        from mcp.server.mcpserver import Image, MCPServer
-
-        return MCPServer, Image
-    except ImportError:  # mcp 1.x
-        from mcp.server.fastmcp import FastMCP, Image
-
-        return FastMCP, Image
+# 도구의 반환 타입(Image)을 MCP 가 주석에서 읽어 이미지 콘텐츠로 바꾸므로, 모듈 수준에서 가져와야 합니다.
+try:  # mcp 2.x
+    from mcp.server.mcpserver import Image
+    from mcp.server.mcpserver import MCPServer as _Server
+except ImportError:  # mcp 1.x
+    try:
+        from mcp.server.fastmcp import FastMCP as _Server
+        from mcp.server.fastmcp import Image
+    except ImportError:  # mcp 미설치: build_mcp 에서 안내
+        _Server = Image = None  # type: ignore[assignment,misc]
 
 
 class _View:
@@ -58,10 +59,11 @@ class _View:
 
 
 def build_mcp(server: str, token: str | None = None, max_width: int = 1280, max_height: int = 800) -> Any:
-    Server, Image = _load_server_class()
+    if _Server is None:
+        raise RuntimeError("mcp 패키지가 없습니다: pip install mcp")
     client = MonitorClient(server, token=token)
     view = _View(client, max_width, max_height)
-    mcp = Server("vmonitor", instructions=INSTRUCTIONS)
+    mcp = _Server("vmonitor", instructions=INSTRUCTIONS)
 
     def run(*actions: dict[str, Any]) -> str:
         r = client.actions(list(actions), space=view.space(), check=False)
@@ -72,7 +74,7 @@ def build_mcp(server: str, token: str | None = None, max_width: int = 1280, max_
         return "OK" if not vals else str(vals[-1])
 
     @mcp.tool()
-    def screenshot(grid: int | None = None) -> Any:
+    def screenshot(grid: int | None = None) -> Image:
         """현재 화면을 이미지로 봅니다. 다른 도구의 좌표는 이 이미지의 픽셀 좌표입니다.
         grid 에 숫자(예: 100)를 주면 원본 화면 기준 그 간격으로 좌표 눈금을 그려 줍니다."""
         return Image(data=view.shot(grid), format="png")

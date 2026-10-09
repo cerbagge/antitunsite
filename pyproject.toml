@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmonitor"
-version = "1.0.0"
+version = "1.0.1"
 description = "앱/브라우저 화면을 모니터처럼 송출하고, AI·매크로가 실제 PC 처럼 마우스·키보드 입력을 보내게 하는 게이트웨이"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,7 @@ x11 = ["python-xlib>=0.33"]
 mcp = ["mcp>=1.2"]
 agent = ["anthropic>=1.12"]
 all = ["playwright>=1.44", "python-xlib>=0.33; sys_platform == 'linux'", "mcp>=1.2", "anthropic>=1.12"]
-dev = ["pytest>=8", "websockets>=12"]
+dev = ["pytest>=8", "websockets>=12", "ruff==0.16.10"]
 
 [project.scripts]
 vmonitor = "vmonitor.cli:main"
@@ -35,3 +35,12 @@ include = ["vmonitor*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+# B905: zip(strict=) 강제 안 함, B027: 기반 클래스의 선택적 훅(start/stop)은 빈 메서드가 의도
+ignore = ["B905", "B027"]

@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  # 브라우저·가상 모니터·Windows 통합 테스트를 '건너뜀'이 아니라 '실패'로 처리 (CI 에서는 반드시 실행돼야 함)
+  VMONITOR_STRICT_TESTS: "1"
+
+jobs:
+  lint:
+    name: 린트 · 패키지
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: ruff
+        run: |
+          pip install ruff==0.16.10
+          ruff check .
+      - name: wheel 빌드 후 설치 확인 (웹 뷰어 HTML 포함 여부)
+        run: |
+          pip install build
+          python -m build --wheel
+          python -m venv /tmp/pkg
+          /tmp/pkg/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/pkg/bin/vmonitor --version
+          /tmp/pkg/bin/python -c "from importlib import resources; assert 'VMonitor' in resources.files('vmonitor.web').joinpath('viewer.html').read_text(encoding='utf-8')"
+
+  test-linux:
+    name: 테스트 (Linux, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: 가상 모니터(Xvfb) 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+      - name: 의존성 설치
+        run: pip install -e ".[all,dev]"
+      - name: Chromium 설치 (Playwright)
+        run: python -m playwright install --with-deps chromium
+      - name: pytest
+        run: pytest -v -rs
+
+  test-windows:
+    name: 테스트 (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: 의존성 설치
+        run: pip install -e ".[all,dev]"
+      - name: Chromium 설치 (Playwright)
+        run: python -m playwright install chromium
+      - name: pytest (메모장 창 캡처·입력 통합 테스트 포함)
+        run: pytest -v -rs
+      - name: CLI 창 목록
+        run: vmonitor windows
