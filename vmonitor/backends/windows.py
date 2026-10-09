@@ -429,25 +429,54 @@ class WindowsBackend(Backend):
             f |= MK_CONTROL
         return f
 
+    def _target_is_foreground(self, hwnd: int) -> bool:
+        """대상 창(또는 대상 앱이 띄운 대화상자 등 같은 프로세스의 창)이 맨 앞인지."""
+        api = _win32()
+        fg = api.GetForegroundWindow()
+        if not fg:
+            return False
+        if fg == hwnd:
+            return True
+        fg_pid, target_pid = wintypes.DWORD(), wintypes.DWORD()
+        api.GetWindowThreadProcessId(fg, ctypes.byref(fg_pid))
+        api.GetWindowThreadProcessId(hwnd, ctypes.byref(target_pid))
+        return fg_pid.value == target_pid.value
+
     def _foreground(self) -> None:
-        """sendinput 모드: 대상 창을 맨 앞으로. Windows 의 포커스 제한을 우회하기 위해 입력 스레드를 잠시 붙입니다."""
+        """sendinput 모드: 대상 창을 맨 앞으로 가져오고, 실제로 앞에 왔는지 확인합니다.
+
+        Windows 는 포그라운드 잠금으로 창 전환을 거부할 수 있습니다. 확인 없이 입력하면 키 입력이 사용자가 쓰던
+        다른 창으로 들어가므로, 끝내 전환되지 않으면 입력하지 않고 오류를 냅니다.
+        """
         api = _win32()
         hwnd = self._check()
-        if api.GetForegroundWindow() == hwnd:
+        if self._target_is_foreground(hwnd):
             return
         if api.IsIconic(hwnd):
             api.ShowWindow(hwnd, SW_RESTORE)
-        fg = api.GetForegroundWindow()
         cur = api.GetCurrentThreadId()
-        fg_thread = api.GetWindowThreadProcessId(fg, None) if fg else 0
-        attached = bool(fg_thread and fg_thread != cur and api.AttachThreadInput(cur, fg_thread, True))
-        try:
-            api.BringWindowToTop(hwnd)
-            api.SetForegroundWindow(hwnd)
-        finally:
-            if attached:
-                api.AttachThreadInput(cur, fg_thread, False)
-        time.sleep(0.05)
+        for attempt in range(3):
+            if attempt:
+                # 잠금 해제: 우리 프로세스가 '마지막 입력'의 주체가 되면 SetForegroundWindow 가 허용됩니다.
+                # 제자리(0,0) 상대 이동이라 화면·커서에는 영향이 없습니다.
+                self._send(self._mouse_input(MOUSEEVENTF_MOVE))
+            fg = api.GetForegroundWindow()
+            fg_thread = api.GetWindowThreadProcessId(fg, None) if fg else 0
+            attached = bool(fg_thread and fg_thread != cur and api.AttachThreadInput(cur, fg_thread, True))
+            try:
+                api.BringWindowToTop(hwnd)
+                api.SetForegroundWindow(hwnd)
+            finally:
+                if attached:
+                    api.AttachThreadInput(cur, fg_thread, False)
+            deadline = time.time() + 0.5
+            while time.time() < deadline:
+                if self._target_is_foreground(hwnd):
+                    time.sleep(0.03)
+                    return
+                time.sleep(0.02)
+        raise BackendError("대상 창을 앞으로 가져오지 못했습니다 (Windows 포그라운드 잠금). "
+                           "다른 창에 입력되지 않도록 입력을 중단했습니다")
 
     def _send(self, *inputs: INPUT) -> None:
         api = _win32()

@@ -42,7 +42,8 @@ def test_browser_end_to_end(unavailable):
             assert await p.get_attribute("#b", "data-n") == "3"
             assert await p.title() == "dbl"
             assert await p.input_value("#t") == "Hi 안녕A!"
-            assert await p.evaluate("window.scrollY") == 200
+            # 휠은 스크롤이 실제로 반영되기 전에 반환될 수 있으므로 반영될 때까지 기다립니다.
+            await p.wait_for_function("window.scrollY === 200", timeout=5000)
             await r.run([{"action": "navigate", "url": "data:text/html,<title>two</title>"}])
             assert await p.title() == "two"
         finally:

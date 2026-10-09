@@ -18,6 +18,8 @@ env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   # 브라우저·가상 모니터·Windows 통합 테스트를 '건너뜀'이 아니라 '실패'로 처리 (CI 에서는 반드시 실행돼야 함)
   VMONITOR_STRICT_TESTS: "1"
+  # 브라우저 버전이 저장소 변경 없이 바뀌어 CI 가 깨지지 않도록 고정 (올릴 때는 의도적으로)
+  PLAYWRIGHT_VERSION: "1.63.0"
 
 jobs:
   lint:
@@ -58,13 +60,9 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: pyproject.toml
-      - name: 가상 모니터(Xvfb) 설치
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
       - name: 의존성 설치
-        run: pip install -e ".[all,dev]"
-      - name: Chromium 설치 (Playwright)
+        run: pip install -e ".[all,dev]" "playwright==${{ env.PLAYWRIGHT_VERSION }}"
+      - name: Chromium 설치 (Playwright, Xvfb 등 시스템 의존성 포함)
         run: python -m playwright install --with-deps chromium
       - name: pytest
         run: pytest -v -rs
@@ -81,7 +79,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: 의존성 설치
-        run: pip install -e ".[all,dev]"
+        run: pip install -e ".[all,dev]" "playwright==${{ env.PLAYWRIGHT_VERSION }}"
       - name: Chromium 설치 (Playwright)
         run: python -m playwright install chromium
       - name: pytest (메모장 창 캡처·입력 통합 테스트 포함)

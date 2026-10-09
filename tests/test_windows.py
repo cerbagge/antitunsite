@@ -6,6 +6,8 @@
 
 import asyncio
 import ctypes
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -68,12 +70,23 @@ def wait_text(top: int, expected: str, timeout: float = 5.0) -> str:
     return text
 
 
+# 스토어판 메모장은 강제 종료돼도 탭 내용을 복원하므로 테스트 사이에 상태를 지웁니다(고전 메모장에선 영향 없음).
+_STORE_NOTEPAD_STATE = os.path.expandvars(
+    r"%LOCALAPPDATA%\Packages\Microsoft.WindowsNotepad_8wekyb3d8bbwe\LocalState\TabState")
+
+
 @pytest.fixture
 def notepad():
+    shutil.rmtree(_STORE_NOTEPAD_STATE, ignore_errors=True)
     proc = subprocess.Popen(["notepad.exe"])
     yield proc
     proc.kill()
     subprocess.run(["taskkill", "/F", "/IM", "notepad.exe"], capture_output=True)
+    try:
+        proc.wait(5)
+    except subprocess.TimeoutExpired:
+        pass
+    shutil.rmtree(_STORE_NOTEPAD_STATE, ignore_errors=True)
     time.sleep(0.5)
 
 
