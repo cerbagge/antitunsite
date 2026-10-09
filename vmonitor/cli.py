@@ -69,6 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--hwnd", help="창 핸들 (예: 0x1A2B3C)")
     g.add_argument("--input-mode", default="post", choices=["post", "sendinput"],
                    help="post=백그라운드 메시지(마우스 안 뺏음), sendinput=실제 입력(앞으로 가져옴)")
+    g.add_argument("--post-activate", action="store_true",
+                   help="post 모드 보완: WPF·Tk·Java 앱처럼 활성 창일 때만 키를 받는 앱에 활성화 메시지를 함께 보냄")
     g = s.add_argument_group("x11 백엔드 (Linux)")
     g.add_argument("--display", help="X 디스플레이 (예: :0, :99)")
     g.add_argument("--xvfb", action="store_true", help="가상 모니터(Xvfb)를 새로 만들어 사용")
@@ -167,7 +169,7 @@ def _backend_opts(args: argparse.Namespace) -> dict[str, Any]:
             sys.exit("window 백엔드에는 --title / --process / --class-name / --hwnd 중 하나가 필요합니다 "
                      "('vmonitor windows' 로 목록 확인)")
         return {**common, "title": args.title, "process": args.process, "class_name": args.class_name,
-                "hwnd": args.hwnd, "input_mode": args.input_mode}
+                "hwnd": args.hwnd, "input_mode": args.input_mode, "post_activate": args.post_activate}
     return {**common, "display": args.display, "xvfb": args.xvfb, "width": args.width, "height": args.height,
             "launch": args.launch, "window": args.title, "window_id": args.window_id}
 

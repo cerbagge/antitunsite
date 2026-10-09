@@ -36,6 +36,7 @@ from .base import Backend, BackendError, NotSupportedError
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------- 상수
+WM_ACTIVATE, WM_SETFOCUS, WM_NCACTIVATE, WA_ACTIVE = 0x0006, 0x0007, 0x0086, 1
 WM_MOUSEMOVE = 0x0200
 WM_LBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK = 0x0201, 0x0202, 0x0203
 WM_RBUTTONDOWN, WM_RBUTTONUP, WM_RBUTTONDBLCLK = 0x0204, 0x0205, 0x0206
@@ -272,7 +273,7 @@ class WindowsBackend(Backend):
 
     def __init__(self, title: str | None = None, process: str | None = None, class_name: str | None = None,
                  hwnd: int | str | None = None, input_mode: str = "post", window_timeout: float = 10.0,
-                 restore_minimized: bool = True, **kw: Any) -> None:
+                 restore_minimized: bool = True, post_activate: bool = False, **kw: Any) -> None:
         super().__init__(**kw)
         if input_mode not in ("post", "sendinput"):
             raise BackendError("input_mode 는 post 또는 sendinput 이어야 합니다")
@@ -283,6 +284,9 @@ class WindowsBackend(Backend):
         self.input_mode = input_mode
         self.window_timeout = window_timeout
         self.restore_minimized = restore_minimized
+        # post 모드 보완: WPF·Tk·Java 처럼 '활성 창'일 때만 키 입력을 받는 앱에, 실제 포커스는 그대로 둔 채
+        # 활성화·포커스 메시지만 보내 입력을 받게 합니다.
+        self.post_activate = post_activate
         self._lock = threading.Lock()
         self._title = ""
         self._post_buttons = 0  # post 모드에서 눌린 버튼 MK_* 플래그
@@ -421,6 +425,16 @@ class WindowsBackend(Backend):
             return self._focus_hwnd
         return self._target_at(*self._cursor)[0]
 
+    def _fake_activate(self, target: int) -> None:
+        """post_activate: 대상 앱에 '활성화됐다/포커스를 받았다' 메시지만 보냄 (실제 포그라운드·커서는 그대로)."""
+        if not self.post_activate:
+            return
+        api = _win32()
+        top = self._check()
+        api.PostMessageW(top, WM_NCACTIVATE, 1, 0)
+        api.PostMessageW(top, WM_ACTIVATE, WA_ACTIVE, 0)
+        api.PostMessageW(target, WM_SETFOCUS, 0, 0)
+
     def _mk_flags(self) -> int:
         f = self._post_buttons
         if "shift" in self._keys_down:
@@ -531,6 +545,7 @@ class WindowsBackend(Backend):
             if down:
                 if not self._post_buttons:
                     self._capture_hwnd = target
+                    self._fake_activate(target)
                 self._focus_hwnd = target
                 self._post_buttons |= msgs[3]
                 # 실제 입력에서는 시스템이 두 번째 누름을 DBLCLK 로 바꿔 줍니다. 직접 보낼 때는 우리가 바꿉니다.
@@ -584,7 +599,10 @@ class WindowsBackend(Backend):
                 msg = WM_SYSKEYDOWN if sys_key else WM_KEYDOWN
             else:
                 msg = WM_SYSKEYUP if sys_key else WM_KEYUP
-            api.PostMessageW(self._key_target(), msg, vk, key_lparam(scan, ext, not down, sys_key))
+            target = self._key_target()
+            if down:
+                self._fake_activate(target)
+            api.PostMessageW(target, msg, vk, key_lparam(scan, ext, not down, sys_key))
             return
         self._foreground()
         # 게임(DirectInput)도 인식하도록 스캔코드 기반으로 보냅니다.
@@ -600,6 +618,7 @@ class WindowsBackend(Backend):
         codes = [int.from_bytes(units[i:i + 2], "little") for i in range(0, len(units), 2)]
         if self.input_mode == "post":
             target = self._key_target()
+            self._fake_activate(target)
             for c in codes:
                 api.PostMessageW(target, WM_CHAR, c, 1)
             return
@@ -609,4 +628,5 @@ class WindowsBackend(Backend):
                        self._key_input(0, c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP))
 
     def info(self) -> dict[str, Any]:
-        return {"hwnd": hex(self.hwnd) if self.hwnd else None, "title": self._title, "input_mode": self.input_mode}
+        return {"hwnd": hex(self.hwnd) if self.hwnd else None, "title": self._title, "input_mode": self.input_mode,
+                "post_activate": self.post_activate}

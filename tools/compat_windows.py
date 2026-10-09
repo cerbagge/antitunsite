@@ -261,7 +261,8 @@ def capture_check(img: Any) -> tuple[bool, str]:
     if img.getextrema() == ((0, 0), (0, 0), (0, 0)):
         return False, "전부 검은색"
     small = img.resize((min(200, img.width), min(150, img.height)))
-    px = list(small.getdata())
+    raw = small.convert("RGB").tobytes()
+    px = [raw[i:i + 3] for i in range(0, len(raw), 3)]
     cover = sum(1 for p in px if abs(p[0] - 255) < 30 and p[1] < 40 and abs(p[2] - 255) < 30) / len(px)
     if cover > 0.2:
         return False, f"덮개 창이 찍힘({cover:.0%})"
@@ -277,11 +278,12 @@ async def check(spec: AppSpec, mode: str, tmp: Path, out: Path, cover_hwnd: int 
         if proc is None:
             res.error = "이 PC 에 해당 앱이 없음"
             return res
-        b = w.WindowsBackend(input_mode=mode, window_timeout=40, input_delay=0.02, **spec.find)
+        b = w.WindowsBackend(input_mode="post" if mode.startswith("post") else mode, post_activate=mode == "post-activate",
+                             window_timeout=40, input_delay=0.02, **spec.find)
         await b.start()
         res.launched = True
         await asyncio.sleep(2.0)  # 앱 초기화
-        if mode == "post" and cover_hwnd:
+        if mode.startswith("post") and cover_hwnd:
             res.background = force_foreground(cover_hwnd)
         img = await b.capture()
         res.capture_ok, res.capture_note = capture_check(img)
@@ -304,8 +306,9 @@ async def check(spec: AppSpec, mode: str, tmp: Path, out: Path, cover_hwnd: int 
                 break
             await asyncio.sleep(0.2)
         res.input_ok = res.text == BACKSPACED
-        if mode == "post" and cover_hwnd:
-            res.extra["foreground_after"] = "cover" if _u32.GetForegroundWindow() == cover_hwnd else "other"
+        if mode.startswith("post") and cover_hwnd:
+            # 백그라운드 입력이 실제 포그라운드(덮개 창)를 빼앗지 않았는지
+            res.extra["cover_still_foreground"] = _u32.GetForegroundWindow() == cover_hwnd
     except Exception as e:
         res.error = f"{type(e).__name__}: {e}"
         traceback.print_exc()
@@ -343,23 +346,27 @@ def to_markdown(results: list[Result]) -> str:
     rows = {}
     for r in results:
         rows.setdefault((r.app, r.label), {})[r.mode] = r
-    lines = ["| 앱 | 가려진 상태 캡처 | post (백그라운드) 입력 | sendinput (실제 입력) | 비고 |",
-             "|---|---|---|---|---|"]
+    lines = ["| 앱 | 가려진 상태 캡처 | post (백그라운드) | post + 활성화 보완 | sendinput (실제 입력) | 비고 |",
+             "|---|---|---|---|---|---|"]
     for (_key, label), modes in rows.items():
-        p, s, c = modes.get("post"), modes.get("sendinput"), modes.get("capture-only")
+        p, pa, s, c = modes.get("post"), modes.get("post-activate"), modes.get("sendinput"), modes.get("capture-only")
         cap = p or c
         notes = []
-        for name, r in (("post", p), ("sendinput", s), ("capture", c)):
+        for name, r in (("post", p), ("post+활성화", pa), ("sendinput", s), ("capture", c)):
             if r is None:
                 continue
             if r.error:
                 notes.append(f"{name}: {r.error}")
             elif r.input_ok is False:
                 notes.append(f"{name} 결과={r.text!r}")
-        if p is not None and p.background is False:
-            notes.append("덮개 창을 앞으로 못 가져옴(백그라운드 조건 미충족)")
+        for r in (p, pa):
+            if r is not None and r.background is False:
+                notes.append(f"{r.mode}: 덮개 창을 앞으로 못 가져옴(백그라운드 조건 미충족)")
+            if r is not None and r.extra.get("cover_still_foreground") is False:
+                notes.append(f"{r.mode}: 입력 중 포그라운드가 바뀜")
         lines.append(f"| {label} | {mark(cap.capture_ok) if cap else '—'} {cap.capture_note if cap else ''} | "
-                     f"{mark(p.input_ok) if p else '—'} | {mark(s.input_ok) if s else '—'} | "
+                     f"{mark(p.input_ok) if p else '—'} | {mark(pa.input_ok) if pa else '—'} | "
+                     f"{mark(s.input_ok) if s else '—'} | "
                      f"{'; '.join(notes).replace('|', '/') or ''} |")
     return "\n".join(lines)
 
@@ -386,7 +393,7 @@ async def main_async(args: argparse.Namespace) -> int:
             for spec in APPS:
                 if wanted and spec.key not in wanted:
                     continue
-                for mode in ("post", "sendinput"):
+                for mode in ("post", "post-activate", "sendinput"):
                     print(f"== {spec.label} / {mode}", flush=True)
                     r = await check(spec, mode, tmp, out, cover_hwnd)
                     print(f"   capture={r.capture_ok} ({r.capture_note}) input={r.input_ok} text={r.text!r} "
@@ -404,7 +411,8 @@ async def main_async(args: argparse.Namespace) -> int:
         with open(summary, "a", encoding="utf-8") as f:
             f.write("## VMonitor Windows 앱 호환성\n\n" + md + "\n\n"
                     f"입력 검증: `{TYPED}` 입력 → 백스페이스 → `{BACKSPACED}` 확인. "
-                    "post 는 분홍색 덮개 창이 앞에 있는 상태(대상 앱이 뒤)에서 실행.\n")
+                    "post 계열은 분홍색 덮개 창이 앞에 있는 상태(대상 앱이 뒤)에서 실행하며, "
+                    "입력 후에도 덮개 창이 계속 앞에 있는지(포커스를 빼앗지 않았는지) 확인합니다.\n")
     return 0
 
 
