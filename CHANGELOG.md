@@ -2,6 +2,16 @@
 
 버전 규칙: `주.부.수` — 주(메인 기능 추가/수정/삭제), 부(중요 버그 수정·덜 중요한 기능 변경), 수(자잘한 버그 수정)
 
+## 1.1.0 — 2026-10-09
+
+### 추가
+- Windows `post` 모드 보완 옵션 `--post-activate` (`post_activate=True`): 입력 직전 대상 앱에 활성화·포커스 메시지만 보내
+  실제 포커스를 빼앗지 않고도 Java(Swing) 앱이 백그라운드 입력을 받도록 함 (실측: Swing ❌→✅, 기존 앱 영향 없음)
+- `tools/compat_windows.py`: 앱 종류별(Win32·WinForms·WPF·Tk·Edge·Java Swing) 가려진 상태 캡처 /
+  post / post+활성화 / sendinput 입력 호환성 점검과 결과표·스크린샷 생성. `--title` 로 내 PC 의 앱 캡처 점검
+- GitHub Actions `Windows 앱 호환성` 작업: 러너에서 위 점검을 실행해 결과표를 작업 요약·아티팩트로 남김
+- README 에 Windows 앱 종류별 실측표와 입력 방식 고르는 순서 추가
+
 ## 1.0.1 — 2026-10-09
 
 ### 추가

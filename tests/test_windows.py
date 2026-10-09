@@ -97,8 +97,9 @@ def test_struct_and_helpers():
     assert isinstance(w.list_windows(), list)
 
 
-async def _type_into_notepad(input_mode: str, text: str) -> tuple[tuple[int, int], int]:
-    b = w.WindowsBackend(process="notepad.exe", input_mode=input_mode, window_timeout=30, input_delay=0.02)
+async def _type_into_notepad(input_mode: str, text: str, post_activate: bool = False) -> tuple[tuple[int, int], int]:
+    b = w.WindowsBackend(process="notepad.exe", input_mode=input_mode, window_timeout=30, input_delay=0.02,
+                         post_activate=post_activate)
     await b.start()
     try:
         img = await b.capture()
@@ -117,9 +118,10 @@ async def _type_into_notepad(input_mode: str, text: str) -> tuple[tuple[int, int
         await b.stop()
 
 
-def test_notepad_post_mode(notepad):
-    """백그라운드 메시지 방식: 창에 직접 입력 (실제 마우스·포커스를 쓰지 않음)."""
-    _, hwnd = asyncio.run(_type_into_notepad("post", "post 안녕"))
+@pytest.mark.parametrize("post_activate", [False, True], ids=["post", "post-activate"])
+def test_notepad_post_mode(notepad, post_activate):
+    """백그라운드 메시지 방식: 창에 직접 입력 (실제 마우스·포커스를 쓰지 않음). 활성화 보완을 켜도 동작해야 함."""
+    _, hwnd = asyncio.run(_type_into_notepad("post", "post 안녕", post_activate))
     assert wait_text(hwnd, "post 안") == "post 안"
 
 

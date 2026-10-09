@@ -33,10 +33,36 @@
 | `demo` | 내장 테스트 화면 | 메모리 | 아니오 | 설치 직후 동작 확인·테스트용 |
 
 > **Windows `post` vs `sendinput`**
-> - `post`(기본): PC 를 계속 쓰면서 백그라운드로 조작합니다. 일반 프로그램(메모장, 탐색기, WinForms/WPF 앱 등)에 적합합니다.
->   게임(DirectInput/Raw Input), 일부 크롬 기반 앱, Ctrl 조합 단축키는 앱에 따라 무시될 수 있습니다.
+> - `post`(기본): PC 를 계속 쓰면서 백그라운드로 조작합니다. 실제 커서·포커스를 건드리지 않습니다.
+>   게임(DirectInput/Raw Input), WPF·Tk 앱, Ctrl 조합 단축키는 앱에 따라 무시될 수 있습니다(아래 실측표).
+> - `--post-activate`: `post` 보완. 입력 직전 대상 앱에 '활성화됨' 메시지만 보내 Java(Swing) 앱 등도 백그라운드로 받게 합니다.
 > - `sendinput`: 창을 맨 앞으로 가져와 진짜 키보드·마우스처럼 입력합니다. 거의 모든 앱(게임 포함)에서 동작하지만
 >   입력하는 순간 실제 커서·포커스가 움직입니다. 관리자 권한으로 실행된 앱은 VMonitor 도 관리자 권한이어야 합니다.
+>   창 전환이 거부되면 다른 창에 입력되지 않도록 입력을 중단하고 오류를 냅니다.
+
+### Windows 앱 종류별 실측 결과
+
+GitHub Actions 의 Windows Server 러너에서 `tools/compat_windows.py` 로 측정했습니다 (2026-10-09, 커밋 `2925744`).
+분홍색 덮개 창이 앞을 가린 상태에서 캡처하고, `ab한글` 입력 → 백스페이스 → `ab한` 이 되는지 확인했습니다.
+post 계열은 입력 후에도 덮개 창이 계속 앞에 있었습니다(= 실제 포커스를 빼앗지 않음).
+
+| 앱 종류 | 가려진 상태 캡처 | `post` | `post` + `--post-activate` | `sendinput` |
+|---|---|---|---|---|
+| 메모장 (Win32) | ✅ | ✅ | ✅ | ✅ |
+| WinForms | ✅ | ✅ | ✅ | ✅ |
+| Edge (크롬 기반) | ✅ | ✅ | ✅ | ✅ |
+| Java Swing | ✅ | ❌ | ✅ | ✅ |
+| WPF | ✅ | ❌ | ❌ | ✅ |
+| Tkinter | ✅ | ❌ | ❌ | ✅ |
+
+**고르는 순서**: `post` → 안 되면 `--post-activate` → 그래도 안 되면 `--input-mode sendinput`.
+
+**내 PC 에서 점검하기** (Windows):
+
+```bash
+python tools/compat_windows.py                       # 위 6종을 내 PC 에서 똑같이 점검 → compat-out/report.md
+python tools/compat_windows.py --title "카카오톡"      # 내가 쓸 앱: 가려진 상태 캡처 확인 + compat-out/custom-capture.png
+```
 
 ## 2. 설치
 

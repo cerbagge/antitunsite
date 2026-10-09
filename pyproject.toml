@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmonitor"
-version = "1.0.1"
+version = "1.1.0"
 description = "앱/브라우저 화면을 모니터처럼 송출하고, AI·매크로가 실제 PC 처럼 마우스·키보드 입력을 보내게 하는 게이트웨이"
 readme = "README.md"
 requires-python = ">=3.10"
