@@ -1,0 +1,45 @@
+name: Windows 앱 호환성
+
+# 앱 종류별(Win32 / WinForms / WPF / Tk / Edge / Java Swing)로 가려진 상태 캡처·post·sendinput 입력을 점검해
+# 결과표를 작업 요약(Summary)에, 스크린샷·보고서를 아티팩트로 남깁니다. 호환성 '보고'용이라 결과가 ❌ 여도 실패 처리하지 않습니다.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "vmonitor/backends/windows.py"
+      - "vmonitor/backends/base.py"
+      - "vmonitor/actions.py"
+      - "tools/compat_windows.py"
+      - ".github/workflows/compat-windows.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    name: 앱 호환성 점검 (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 설치
+        run: pip install -e .
+      - name: 호환성 점검
+        run: python tools/compat_windows.py --out compat-out
+      - name: 결과 업로드 (보고서·스크린샷)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-compat
+          path: compat-out
+          if-no-files-found: warn
