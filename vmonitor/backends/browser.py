@@ -4,6 +4,11 @@
 입력은 브라우저 내부(CDP)로 직접 들어가므로 **실제 PC 의 마우스·키보드를 전혀 빼앗지 않고**,
 창이 가려지거나 최소화되어도 동작합니다. 여러 개를 동시에 띄워도 서로 간섭하지 않습니다.
 
+네트워크 감시(``watch``): 페이지가 스스로 받아 오는 JSON(XHR/fetch) 응답을 옆에서 기록합니다.
+안티봇 때문에 JSON 주소를 직접 요청할 수 없는 사이트도, 실제 브라우저가 챌린지를 통과한 뒤 받은
+데이터는 그대로 읽을 수 있습니다(서버에 요청을 더 보내지 않음). ``players()`` 는 그중 플레이어 목록
+(Dynmap/LiveAtlas, squaremap, BlueMap 형식)을 찾아 공통 형식으로 돌려줍니다.
+
 필요 패키지: ``pip install playwright`` 후 ``playwright install chromium``
 """
 
@@ -11,7 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
+import re
+import time
+from collections import OrderedDict
 from typing import Any
 
 from PIL import Image
@@ -34,6 +43,12 @@ PW_KEYS = {
 
 _SHIFT_OF = {base: sym for sym, base in SHIFTED_SYMBOLS.items()}
 
+#: 자동화 표시를 숨기는 스크립트 (stealth). 페이지 스크립트보다 먼저 실행됩니다.
+STEALTH_INIT = "Object.defineProperty(Navigator.prototype, 'webdriver', {get: () => undefined, configurable: true});"
+
+MAX_CAPTURES = 50               # 기록해 둘 응답 수(주소별 최신 1개, 오래된 것부터 버림)
+MAX_CAPTURE_BYTES = 5_000_000   # 이보다 큰 응답은 기록하지 않음
+
 
 def pw_key(key: str) -> str:
     if key in PW_KEYS:
@@ -50,7 +65,8 @@ class BrowserBackend(Backend):
                  headless: bool = True, user_data_dir: str | None = None, browser: str = "chromium",
                  executable_path: str | None = None, channel: str | None = None,
                  follow_new_tabs: bool = True, wheel_step: int = 100, args: list[str] | None = None,
-                 **kw: Any) -> None:
+                 stealth: bool = False, user_agent: str | None = None, extra_headers: dict[str, str] | None = None,
+                 watch: list[str] | None = None, **kw: Any) -> None:
         super().__init__(**kw)
         self.url = url
         self.viewport = {"width": int(width), "height": int(height)}
@@ -62,6 +78,14 @@ class BrowserBackend(Backend):
         self.follow_new_tabs = follow_new_tabs
         self.wheel_step = wheel_step
         self.args = args or []
+        self.stealth = stealth
+        self.user_agent = user_agent
+        self.extra_headers = dict(extra_headers or {})
+        # 감시할 응답 주소 정규식. 비어 있으면 모든 XHR/fetch JSON 을 기록합니다.
+        self.watch = [re.compile(w) for w in (watch or [])]
+        self._captures: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._capture_seq = 0
+        self._record_tasks: set[asyncio.Future[None]] = set()
         self._size = (int(width), int(height))
         self._pw = None
         self._browser = None
@@ -82,22 +106,36 @@ class BrowserBackend(Backend):
             launch["executable_path"] = self.executable_path
         if self.channel:
             launch["channel"] = self.channel
-        if self.args:
-            launch["args"] = self.args
+        args = list(self.args)
+        if self.stealth and self.browser_name == "chromium":
+            # 'Chrome 이 자동화 소프트웨어에 의해 제어되고 있습니다' 표시와 navigator.webdriver 를 없앱니다.
+            launch["ignore_default_args"] = ["--enable-automation"]
+            args.append("--disable-blink-features=AutomationControlled")
+        if args:
+            launch["args"] = args
+        ctx_opts: dict[str, Any] = {"viewport": self.viewport, "device_scale_factor": 1}
+        if self.user_agent:
+            ctx_opts["user_agent"] = self.user_agent
+        if self.extra_headers:
+            ctx_opts["extra_http_headers"] = self.extra_headers
         if self.user_data_dir:
-            # 로그인 상태·쿠키를 유지하는 영구 프로필
-            self._context = await btype.launch_persistent_context(
-                self.user_data_dir, viewport=self.viewport, device_scale_factor=1, **launch)
+            # 로그인 상태·쿠키를 유지하는 영구 프로필 (안티봇 챌린지 통과 쿠키도 유지됨)
+            self._context = await btype.launch_persistent_context(self.user_data_dir, **ctx_opts, **launch)
         else:
             self._browser = await btype.launch(**launch)
-            self._context = await self._browser.new_context(viewport=self.viewport, device_scale_factor=1)
+            self._context = await self._browser.new_context(**ctx_opts)
+        if self.stealth:
+            await self._context.add_init_script(STEALTH_INIT)
         self._context.on("page", self._on_new_page)
+        self._context.on("response", self._on_response)
         pages = self._context.pages
         self._page = pages[0] if pages else await self._context.new_page()
         if self.url:
             await self.navigate(self.url)
 
     async def stop(self) -> None:
+        for t in list(self._record_tasks):
+            t.cancel()
         for closer in (self._context, self._browser):
             if closer is not None:
                 try:
@@ -112,6 +150,59 @@ class BrowserBackend(Backend):
         if self.follow_new_tabs:
             log.info("새 탭으로 전환: %s", page.url)
             self._page = page
+
+    # ------------------------------------------------------------------ 네트워크 감시
+    def _on_response(self, resp: Any) -> None:
+        try:
+            if resp.request.resource_type not in ("xhr", "fetch"):
+                return
+            url = resp.url
+        except Exception:
+            return
+        if self.watch and not any(w.search(url) for w in self.watch):
+            return
+        t = asyncio.ensure_future(self._record(resp, url))
+        self._record_tasks.add(t)  # 작업이 끝나기 전에 GC 되지 않도록 참조 유지
+        t.add_done_callback(self._record_tasks.discard)
+
+    async def _record(self, resp: Any, url: str) -> None:
+        try:
+            body = await resp.body()
+            if len(body) > MAX_CAPTURE_BYTES:
+                return
+            data = json.loads(body)
+        except Exception:  # JSON 이 아니거나 본문을 읽을 수 없는 응답(리다이렉트 등)
+            return
+        self._capture_seq += 1
+        self._captures.pop(url, None)
+        self._captures[url] = {"url": url, "status": resp.status, "ts": time.time(),
+                               "seq": self._capture_seq, "data": data}
+        while len(self._captures) > MAX_CAPTURES:
+            self._captures.popitem(last=False)
+
+    def captures(self, pattern: str | None = None) -> list[dict[str, Any]]:
+        rx = re.compile(pattern) if pattern else None
+        items = [c for c in self._captures.values() if rx is None or rx.search(c["url"])]
+        return sorted(items, key=lambda c: c["seq"], reverse=True)
+
+    def players(self) -> dict[str, Any]:
+        for c in self.captures():
+            found = find_players(c["data"])
+            if found is not None:
+                return {"source": c["url"], "ts": c["ts"], "age_s": round(time.time() - c["ts"], 1),
+                        "count": len(found), "players": found}
+        return {"source": None, "ts": None, "age_s": None, "count": 0, "players": [],
+                "note": "아직 플레이어 목록이 담긴 응답을 받지 못했습니다(페이지 로드·챌린지 통과 후 몇 초 기다려 주세요)"}
+
+    async def evaluate(self, expression: str, timeout: float = 30.0) -> Any:
+        try:
+            return await asyncio.wait_for(self.page.evaluate(expression), timeout)
+        except asyncio.TimeoutError as e:
+            raise BackendError(f"스크립트 실행이 {timeout:.0f}초 안에 끝나지 않았습니다") from e
+        except BackendError:
+            raise
+        except Exception as e:
+            raise BackendError(f"스크립트 실행 실패: {e}") from e
 
     @property
     def page(self) -> Any:
@@ -176,6 +267,43 @@ class BrowserBackend(Backend):
         try:
             p = self.page
             tabs = len([x for x in self._context.pages if not x.is_closed()])
-            return {"url": p.url, "tabs": tabs, "headless": self.headless}
+            return {"url": p.url, "tabs": tabs, "headless": self.headless, "stealth": self.stealth,
+                    "captures": len(self._captures)}
         except Exception as e:
             return {"error": str(e)}
+
+
+def _num_or_none(v: Any) -> float | None:
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _player(p: Any) -> dict[str, Any] | None:
+    if not isinstance(p, dict):
+        return None
+    pos = p.get("position") if isinstance(p.get("position"), dict) else p  # BlueMap 은 position 안에 좌표
+    x, y, z = (_num_or_none(pos.get(k)) for k in ("x", "y", "z"))
+    name = p.get("name") or p.get("account") or p.get("displayName")
+    if name is None and x is None:
+        return None
+    return {"name": name, "account": p.get("account") or p.get("uuid"), "world": p.get("world"),
+            "x": x, "y": y, "z": z, "health": p.get("health"), "armor": p.get("armor"),
+            "foreign": p.get("foreign")}
+
+
+def find_players(data: Any, depth: int = 2) -> list[dict[str, Any]] | None:
+    """JSON 에서 ``players`` 배열을 찾아 공통 형식(name, account, world, x, y, z, ...)으로 바꿉니다.
+
+    Dynmap/LiveAtlas(``up/world/...``), squaremap(``players.json``), BlueMap(``live/players.json``) 형식을 지원합니다.
+    플레이어가 0명인 목록도 '찾음'으로 보고 빈 리스트를 돌려주며, 목록 자체가 없으면 None 입니다.
+    """
+    if not isinstance(data, dict):
+        return None
+    ps = data.get("players")
+    if isinstance(ps, list):
+        return [x for x in (_player(p) for p in ps) if x is not None]
+    if depth > 0:
+        for v in data.values():
+            found = find_players(v, depth - 1)
+            if found is not None:
+                return found
+    return None

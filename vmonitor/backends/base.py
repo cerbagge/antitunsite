@@ -77,6 +77,19 @@ class Backend(ABC):
     async def navigate(self, url: str) -> None:
         raise NotSupportedError(f"{self.name} 백엔드는 navigate 를 지원하지 않습니다")
 
+    # ------------------------------------------------------------------ 페이지 데이터 (브라우저 백엔드 전용)
+    def captures(self, pattern: str | None = None) -> list[dict[str, Any]]:
+        """페이지가 받아 온 JSON 응답 기록(최신순)."""
+        raise NotSupportedError(f"{self.name} 백엔드는 응답 감시를 지원하지 않습니다 (browser 백엔드 전용)")
+
+    def players(self) -> dict[str, Any]:
+        """기록된 응답에서 찾은 플레이어 목록."""
+        raise NotSupportedError(f"{self.name} 백엔드는 플레이어 조회를 지원하지 않습니다 (browser 백엔드 전용)")
+
+    async def evaluate(self, expression: str, timeout: float = 30.0) -> Any:
+        """페이지 안에서 JavaScript 식을 실행하고 결과(JSON 값)를 돌려줍니다."""
+        raise NotSupportedError(f"{self.name} 백엔드는 스크립트 실행을 지원하지 않습니다 (browser 백엔드 전용)")
+
     def info(self) -> dict[str, Any]:
         """백엔드별 부가 정보(창 제목, URL 등)."""
         return {}

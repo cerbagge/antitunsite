@@ -4,6 +4,7 @@
   windows  송출할 수 있는 창 목록 보기 (Windows: Win32, Linux: X11)
   shot     실행 중인 서버에서 스크린샷 한 장 저장
   do       실행 중인 서버에 액션(JSON) 보내기
+  players  [browser] 페이지가 받아 온 데이터에서 플레이어 위치 보기
   mcp      Claude Desktop/Claude Code 등 MCP 클라이언트용 도구 서버(stdio) 실행
   agent    Claude(컴퓨터 사용 도구)가 화면을 보고 작업을 수행하게 하기
 """
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
   vmonitor serve --backend demo
   vmonitor serve --backend browser --url https://www.google.com --width 1280 --height 800
   vmonitor serve --backend browser --url https://example.com --user-data-dir ./profile --headful
+  vmonitor serve --backend browser --url https://map.example.com/ --channel chrome --headful --user-data-dir ./profile --stealth
   vmonitor serve --backend window --title "메모장|Notepad"
   vmonitor serve --backend window --process chrome.exe --input-mode sendinput
   vmonitor serve --backend x11 --xvfb --width 1280 --height 800 --launch "firefox" --title Firefox
@@ -63,6 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--browser", default="chromium", choices=["chromium", "firefox", "webkit"])
     g.add_argument("--channel", help="설치된 브라우저 사용: chrome, msedge 등")
     g.add_argument("--executable-path", help="브라우저 실행 파일 경로")
+    g.add_argument("--stealth", action="store_true",
+                   help="자동화 표시(navigator.webdriver, '자동화 소프트웨어' 안내줄) 숨기기. 안티봇 사이트용")
+    g.add_argument("--user-agent", help="User-Agent 바꾸기")
+    g.add_argument("--header", action="append", default=[], metavar="'이름: 값'",
+                   help="모든 요청에 붙일 HTTP 헤더 (여러 번 지정 가능. 예: 사이트에서 받은 허용 토큰)")
+    g.add_argument("--watch", action="append", default=[], metavar="정규식",
+                   help="기록할 응답 URL 정규식 (여러 번 지정 가능, 생략하면 모든 XHR/fetch JSON 기록)")
     g = s.add_argument_group("window 백엔드 (Windows)")
     g.add_argument("--process", help="프로세스 이름 (예: notepad.exe)")
     g.add_argument("--class-name", help="창 클래스 이름")
@@ -94,6 +103,11 @@ def build_parser() -> argparse.ArgumentParser:
 """)
     _add_client_args(d)
     d.add_argument("actions", help="액션 JSON (객체 또는 배열)")
+
+    pl = sub.add_parser("players", help="[browser] 플레이어 위치 보기 (페이지가 받아 온 데이터에서)")
+    _add_client_args(pl)
+    pl.add_argument("--json", action="store_true")
+    pl.add_argument("--watch", type=float, metavar="초", help="N 초마다 계속 출력 (Ctrl+C 로 종료)")
 
     m = sub.add_parser("mcp", help="MCP 도구 서버 (stdio)")
     _add_client_args(m)
@@ -143,6 +157,8 @@ def main(argv: list[str] | None = None) -> None:
         r = c.actions(json.loads(args.actions))
         print(json.dumps(r, ensure_ascii=False, indent=2))
         sys.exit(0 if r.get("ok") else 1)
+    elif args.cmd == "players":
+        _players(args)
     elif args.cmd == "mcp":
         from .mcp_server import run_mcp
 
@@ -163,7 +179,8 @@ def _backend_opts(args: argparse.Namespace) -> dict[str, Any]:
     if args.backend == "browser":
         return {**common, "url": args.url, "width": args.width, "height": args.height, "headless": not args.headful,
                 "user_data_dir": args.user_data_dir, "browser": args.browser, "channel": args.channel,
-                "executable_path": args.executable_path}
+                "executable_path": args.executable_path, "stealth": args.stealth, "user_agent": args.user_agent,
+                "extra_headers": _parse_headers(args.header), "watch": args.watch}
     if args.backend == "window":
         if not (args.title or args.process or args.class_name or args.hwnd):
             sys.exit("window 백엔드에는 --title / --process / --class-name / --hwnd 중 하나가 필요합니다 "
@@ -172,6 +189,40 @@ def _backend_opts(args: argparse.Namespace) -> dict[str, Any]:
                 "hwnd": args.hwnd, "input_mode": args.input_mode, "post_activate": args.post_activate}
     return {**common, "display": args.display, "xvfb": args.xvfb, "width": args.width, "height": args.height,
             "launch": args.launch, "window": args.title, "window_id": args.window_id}
+
+
+def _parse_headers(items: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for item in items:
+        name, sep, value = item.partition(":")
+        if not sep or not name.strip():
+            sys.exit(f"--header 형식이 올바르지 않습니다: {item!r} (예: --header 'X-Token: abc')")
+        out[name.strip()] = value.strip()
+    return out
+
+
+def _players(args: argparse.Namespace) -> None:
+    import time
+
+    from .client import MonitorClient
+
+    c = MonitorClient(args.server, token=args.token)
+    try:
+        while True:
+            r = c.players()
+            if args.json:
+                print(json.dumps(r, ensure_ascii=False), flush=True)
+            else:
+                print(f"[{time.strftime('%H:%M:%S')}] {r['count']}명  (출처 {r.get('source') or '-'}, "
+                      f"{r.get('age_s')}초 전)" if r.get("source") else r.get("note", "데이터 없음"))
+                for p in r["players"]:
+                    xyz = ", ".join("-" if p[k] is None else f"{p[k]:g}" for k in ("x", "y", "z"))
+                    print(f"  {p.get('name') or p.get('account')}  {p.get('world') or ''}  ({xyz})")
+            if not args.watch:
+                break
+            time.sleep(max(args.watch, 0.5))
+    except KeyboardInterrupt:
+        pass
 
 
 def _serve(args: argparse.Namespace) -> None:

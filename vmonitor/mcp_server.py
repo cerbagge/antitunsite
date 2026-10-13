@@ -127,6 +127,23 @@ def build_mcp(server: str, token: str | None = None, max_width: int = 1280, max_
         return run({"action": "wait", "duration": min(max(seconds, 0.0), 60.0)})
 
     @mcp.tool()
+    def players() -> dict[str, Any]:
+        """(브라우저 백엔드 전용) 지도 페이지가 받아 온 데이터에서 플레이어 위치 목록을 가져옵니다.
+        Dynmap/LiveAtlas·squaremap·BlueMap 웹맵 지원. 반환: {"count", "age_s", "players": [{name, world, x, y, z}, ...]}."""
+        return client.players()
+
+    @mcp.tool()
+    def page_data(url_pattern: str | None = None, limit: int = 5) -> list[dict[str, Any]]:
+        """(브라우저 백엔드 전용) 페이지가 받아 온 JSON 응답 기록을 최신순으로 봅니다. url_pattern 은 URL 정규식."""
+        return client.captures(url_pattern, limit=limit)
+
+    @mcp.tool()
+    def evaluate_js(expression: str) -> Any:
+        """(브라우저 백엔드 전용) 현재 페이지에서 JavaScript 식을 실행하고 결과(JSON 값)를 돌려줍니다.
+        예: "document.title", "[...document.querySelectorAll('a')].length"."""
+        return client.evaluate(expression)
+
+    @mcp.tool()
     def run_actions(actions: list[dict[str, Any]]) -> str:
         """여러 액션을 한 번에 순서대로 실행합니다. 좌표는 스크린샷 이미지 기준.
         예: [{"action":"click","x":10,"y":20},{"action":"type","text":"hi"},{"action":"key","keys":"enter"}]"""

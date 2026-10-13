@@ -2,6 +2,17 @@
 
 버전 규칙: `주.부.수` — 주(메인 기능 추가/수정/삭제), 부(중요 버그 수정·덜 중요한 기능 변경), 수(자잘한 버그 수정)
 
+## 1.2.0 — 2026-10-13
+
+### 추가
+- browser 백엔드 응답 감시(`--watch`): 페이지가 스스로 받아 오는 XHR/fetch JSON 응답을 기록.
+  안티봇 때문에 JSON 주소를 직접 요청할 수 없는 사이트도 실제 브라우저가 받은 데이터를 읽을 수 있음(추가 요청 없음)
+- 플레이어 위치 조회: `GET /api/players`, `vmonitor players [--watch 초]`, MCP `players` 도구.
+  Dynmap/LiveAtlas·squaremap·BlueMap 웹맵 형식을 공통 형식(name, world, x, y, z …)으로 변환
+- `GET /api/captures`(응답 기록 조회), `POST /api/eval`(페이지 안 JavaScript 실행, view-only 면 차단),
+  MCP `page_data`·`evaluate_js` 도구, `MonitorClient.players()/captures()/evaluate()`
+- browser 백엔드 옵션 `--stealth`(자동화 표시 숨김), `--user-agent`, `--header '이름: 값'`(모든 요청에 헤더 추가)
+
 ## 1.1.0 — 2026-10-09
 
 ### 추가
