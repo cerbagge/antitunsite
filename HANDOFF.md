@@ -1,7 +1,7 @@
 # HANDOFF — 웹맵(Dynmap/LiveAtlas) 플레이어 위치 읽기 (VMonitor 1.2.0)
 
 - 저장소: `cerbagge/antitunsite`
-- 브랜치: `claude/gallant-faraday-vf00ch` (PR: https://github.com/cerbagge/antitunsite/pull/2)
+- 브랜치: `claude/player-location-handoff` (내용 동일: `claude/gallant-faraday-vf00ch`, PR: https://github.com/cerbagge/antitunsite/pull/2)
 - 대상 사이트: `https://map.planetearth.kr/#world;flat;0,64,32;0`
 
 ## 1. 무엇을 만들었나
@@ -38,7 +38,7 @@ VMonitor(브라우저·앱 화면을 송출하고 AI·매크로가 조작하게 
 ```powershell
 git clone https://github.com/cerbagge/antitunsite.git
 cd antitunsite
-git checkout claude/gallant-faraday-vf00ch
+git checkout claude/player-location-handoff
 
 py -m venv .venv
 # 실행 정책 오류가 나면 먼저: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
