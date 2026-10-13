@@ -96,6 +96,25 @@ class MonitorClient:
             time.sleep(interval)
         return False
 
+    # ------------------------------------------------------------------ 페이지 데이터 (browser 백엔드)
+    def captures(self, pattern: str | None = None, data: bool = True, limit: int = 20) -> list[dict[str, Any]]:
+        """페이지가 받아 온 JSON 응답 기록(최신순). pattern 은 URL 정규식."""
+        return self._get("/api/captures", pattern=pattern, data=str(data).lower(), limit=limit).json()["captures"]
+
+    def players(self) -> dict[str, Any]:
+        """기록된 응답에서 찾은 플레이어 목록: {"source", "age_s", "count", "players": [{name, world, x, y, z}, ...]}."""
+        return self._get("/api/players").json()
+
+    def evaluate(self, expression: str, timeout: float = 30.0) -> Any:
+        """페이지 안에서 JavaScript 식을 실행하고 결과를 돌려줍니다."""
+        r = self._http.post("/api/eval", json={"expression": expression, "timeout": timeout})
+        if r.status_code >= 400:
+            raise MonitorError(f"{r.status_code}: {r.text}")
+        out = r.json()
+        if not out.get("ok"):
+            raise MonitorError(out.get("error", "스크립트 실행 실패"))
+        return out.get("value")
+
     # ------------------------------------------------------------------ 입력
     def actions(self, actions: list[dict[str, Any]] | dict[str, Any], space: Any = None,
                 screenshot: bool | dict[str, Any] = False, settle_ms: int = 300, check: bool = True) -> dict[str, Any]:

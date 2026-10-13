@@ -8,6 +8,9 @@
   GET  /api/screenshot        지금 화면 한 장 (PNG/JPEG, 축소·격자·커서 표시 옵션)
   GET  /api/pixel?x=&y=       한 점의 색 (매크로의 '색 바뀔 때까지 대기'용)
   POST /api/actions           입력 액션 실행 (+ 실행 후 스크린샷 동봉 옵션)
+  GET  /api/captures          [browser] 페이지가 받아 온 JSON 응답 기록 (안티봇 사이트의 데이터 읽기)
+  GET  /api/players           [browser] 기록된 응답에서 찾은 플레이어 위치 (Dynmap/LiveAtlas·squaremap·BlueMap)
+  POST /api/eval              [browser] 페이지 안에서 JavaScript 식 실행 (view-only 면 차단)
   WS   /ws                    양방향: JSON 액션 ↔ 결과, 선택적으로 JPEG 프레임 수신
 """
 
@@ -17,6 +20,7 @@ import asyncio
 import base64
 import contextlib
 import logging
+import re
 import secrets
 import time
 from importlib import resources
@@ -28,7 +32,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .actions import ActionRunner
-from .backends.base import Backend
+from .backends.base import Backend, BackendError, NotSupportedError
 from .hub import Encoded, FrameHub
 
 log = logging.getLogger(__name__)
@@ -49,6 +53,11 @@ class ActionsRequest(BaseModel):
     screenshot: bool | ScreenshotOptions = Field(False, description="실행 후 스크린샷을 base64 로 함께 받기")
     settle_ms: int = Field(300, description="스크린샷 전에 화면이 바뀌길 기다리는 시간(ms)")
     stop_on_error: bool = True
+
+
+class EvalRequest(BaseModel):
+    expression: str = Field(..., description="페이지에서 실행할 JavaScript 식 (Promise 면 결과를 기다림)")
+    timeout: float = Field(30.0, gt=0, le=120)
 
 
 def _encoded_json(enc: Encoded, frame_size: tuple[int, int], seq: int) -> dict[str, Any]:
@@ -191,6 +200,39 @@ def create_app(backend: Backend, fps: float = 10.0, token: str | None = None, re
     @app.post("/api/actions", dependencies=[Depends(require_auth)])
     async def api_actions(req: ActionsRequest, request: Request) -> dict[str, Any]:
         return await run_actions(req, request.client.host if request.client else "?")
+
+    # ------------------------------------------------------------------ 페이지 데이터 (browser 백엔드)
+    @app.get("/api/captures", dependencies=[Depends(require_auth)])
+    async def api_captures(pattern: str | None = Query(None, description="URL 정규식으로 거르기"),
+                           data: bool = Query(True, description="false 면 본문 없이 주소·시각만"),
+                           limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
+        try:
+            items = backend.captures(pattern)[:limit]
+        except NotSupportedError as e:
+            raise HTTPException(400, str(e)) from e
+        except re.error as e:
+            raise HTTPException(400, f"pattern 정규식 오류: {e}") from e
+        if not data:
+            items = [{k: v for k, v in c.items() if k != "data"} for c in items]
+        return {"count": len(items), "captures": items}
+
+    @app.get("/api/players", dependencies=[Depends(require_auth)])
+    async def api_players() -> dict[str, Any]:
+        try:
+            return backend.players()
+        except NotSupportedError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/eval", dependencies=[Depends(require_auth)])
+    async def api_eval(req: EvalRequest) -> dict[str, Any]:
+        if read_only:
+            raise HTTPException(403, "읽기 전용(view-only) 모드라 스크립트 실행이 차단되었습니다")
+        try:
+            return {"ok": True, "value": await backend.evaluate(req.expression, timeout=req.timeout)}
+        except NotSupportedError as e:
+            raise HTTPException(400, str(e)) from e
+        except BackendError as e:
+            return {"ok": False, "error": str(e)}
 
     # ------------------------------------------------------------------ WebSocket
     @app.websocket("/ws")

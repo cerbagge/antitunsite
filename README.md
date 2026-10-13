@@ -114,6 +114,8 @@ vmonitor serve --backend x11 --xvfb --width 1280 --height 800 --launch "firefox"
 | `--view-only` | 송출만 하고 입력은 차단 |
 | `--input-delay-ms 10` | 입력 이벤트 사이 간격 (느린 앱이면 늘리기) |
 | `--headful`, `--user-data-dir ./profile`, `--channel chrome` | (browser) 창 띄우기, 로그인 유지, 설치된 크롬/엣지 사용 |
+| `--stealth`, `--user-agent`, `--header '이름: 값'` | (browser) 자동화 표시 숨기기, UA 변경, 모든 요청에 헤더 추가 (안티봇 사이트용, 4-5 참고) |
+| `--watch 정규식` | (browser) 기록할 응답 URL (생략하면 모든 XHR/fetch JSON 을 최근 50개까지 기록) |
 | `--title`, `--process`, `--class-name`, `--hwnd`, `--input-mode` | (window) 대상 창 지정, 입력 방식 |
 | `--xvfb`, `--launch`, `--display`, `--title`, `--window-id` | (x11) 가상 모니터, 실행할 앱, 대상 창 |
 
@@ -207,7 +209,8 @@ claude mcp add vmonitor -- vmonitor mcp --server http://127.0.0.1:8765
 }
 ```
 
-제공 도구: `screenshot`, `screen_info`, `click`, `move_mouse`, `drag`, `scroll`, `type_text`, `press_key`, `navigate`, `wait`, `run_actions`.
+제공 도구: `screenshot`, `screen_info`, `click`, `move_mouse`, `drag`, `scroll`, `type_text`, `press_key`, `navigate`, `wait`, `run_actions`,
+`players`, `page_data`, `evaluate_js` (마지막 셋은 browser 백엔드 전용, 4-5 참고).
 AI 에게는 최대 1280×800 으로 축소한 스크린샷을 보여 주고, AI 가 준 좌표는 실제 화면 좌표로 자동 환산합니다.
 
 ### 4-4. Claude 컴퓨터 사용 에이전트 (내장)
@@ -225,18 +228,53 @@ vmonitor agent "..." --confirm                 # 동작 묶음마다 사람이 �
 - 안전 분류기가 요청을 거절하면 **서버 측 대체 모델(`fallbacks: "default"`)로 자동 재시도**하도록 켜 두었습니다. 끄려면 `--no-fallback`.
 - 진행 상황 요약(`display: "updates"`)을 터미널에 표시합니다.
 
+### 4-5. 페이지 데이터 읽기 — 안티봇 사이트의 웹맵 플레이어 위치 (browser 백엔드)
+
+JSON 주소를 직접 요청하면 안티봇(Cloudflare 등)에 막히는 사이트도, **실제 브라우저가 챌린지를 통과한 뒤
+페이지가 스스로 받아 오는 응답**은 그대로 읽을 수 있습니다. VMonitor 는 그 응답을 옆에서 기록만 하므로
+서버에 요청을 더 보내지 않습니다. (사이트 운영자가 허용한 범위에서 사용하세요.)
+
+```bash
+# 1) 실제 크롬 + 영구 프로필 + 자동화 표시 숨김으로 지도 열기
+vmonitor serve --backend browser --url "https://map.example.com/#world;flat;0,64,32;0" \
+    --channel chrome --headful --user-data-dir ./map_profile --stealth
+#    처음 한 번 챌린지가 뜨면 열린 크롬 창(또는 웹 뷰어)에서 직접 통과 → 쿠키가 프로필에 남음
+
+# 2) 플레이어 위치 보기
+vmonitor players                 # 한 번
+vmonitor players --watch 5       # 5초마다 계속
+curl http://127.0.0.1:8765/api/players
+```
+
+```json
+{"source": "https://map.example.com/up/world/world/1791850000", "age_s": 1.2, "count": 1,
+ "players": [{"name": "Steve", "account": "Steve", "world": "world", "x": 10.5, "y": 64.0, "z": -3.0, "health": 20, ...}]}
+```
+
+| 엔드포인트 | 설명 |
+|---|---|
+| `GET /api/players` | 기록된 응답 중 가장 최근의 `players` 목록 (Dynmap/LiveAtlas, squaremap, BlueMap 형식 → 공통 형식) |
+| `GET /api/captures?pattern=정규식&data=false&limit=20` | 페이지가 받아 온 JSON 응답 기록(최신순). 다른 웹맵·사이트의 데이터 주소 찾기에 사용 |
+| `POST /api/eval` `{"expression": "document.title"}` | 페이지 안에서 JavaScript 식 실행 (앱 메모리 상태 읽기 등). `--view-only` 면 차단 |
+
+- 사이트 운영자가 **허용 토큰·헤더**를 준 경우 `--header 'X-Token: 값'` 으로 모든 요청에 붙일 수 있습니다.
+- 안티봇은 헤드리스 브라우저를 잘 감지합니다. `--headful` + `--channel chrome` + `--user-data-dir` 조합을 권장합니다.
+- Python: `MonitorClient().players()`, `.captures(pattern)`, `.evaluate(expr)`.
+
 ## 5. 보안 주의
 
 - 기본은 `127.0.0.1`(내 PC)에서만 접속됩니다. `--host 0.0.0.0` 으로 공개할 때는 **반드시 `--token`** 을 지정하세요
   (토큰 없이 공개하면 같은 네트워크의 누구나 그 앱을 조작할 수 있습니다).
 - 토큰은 `Authorization: Bearer <토큰>` 헤더, `X-API-Key` 헤더, 또는 `?token=` 으로 전달합니다.
+- `/api/eval` 은 로그인된 브라우저 안에서 임의 스크립트를 실행할 수 있으므로, 외부에 공개할 때는 토큰을 꼭 쓰고
+  필요 없으면 `--view-only` 로 막으세요.
 - AI 에이전트에게 결제·삭제·메시지 전송 같은 되돌리기 어려운 작업을 맡길 때는 `--confirm` 을 권장합니다.
 
 ## 6. 프로젝트 구조
 
 ```
 vmonitor/
-  cli.py              명령줄 (serve / windows / shot / do / mcp / agent)
+  cli.py              명령줄 (serve / windows / shot / do / players / mcp / agent)
   server.py           HTTP·WebSocket 게이트웨이, MJPEG 스트림
   hub.py              프레임 허브 (캡처 1회 → 다수 시청자, 인코딩 캐시, 격자/커서 표시)
   actions.py          액션 규격·검증·실행 (좌표계 환산, 실패 시 중단·키 해제)
