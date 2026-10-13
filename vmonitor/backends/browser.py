@@ -19,6 +19,7 @@ import io
 import json
 import logging
 import re
+import sys
 import time
 from collections import OrderedDict
 from typing import Any
@@ -107,6 +108,9 @@ class BrowserBackend(Backend):
         if self.channel:
             launch["channel"] = self.channel
         args = list(self.args)
+        if self.browser_name == "chromium" and sys.platform == "win32":
+            # Playwright 는 기본으로 --no-sandbox 를 붙입니다(컨테이너용). Windows 에선 샌드박스가 동작하므로 켭니다.
+            launch["chromium_sandbox"] = True
         if self.stealth and self.browser_name == "chromium":
             # 'Chrome 이 자동화 소프트웨어에 의해 제어되고 있습니다' 표시와 navigator.webdriver 를 없앱니다.
             launch["ignore_default_args"] = ["--enable-automation"]
